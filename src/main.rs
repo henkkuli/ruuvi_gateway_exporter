@@ -1,5 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
-
+use clap::Parser;
 use hifitime::Epoch;
 use parking_lot::Mutex;
 use ruuvi_sensor_protocol::{
@@ -7,6 +6,7 @@ use ruuvi_sensor_protocol::{
     SensorValues, Temperature, TransmitterPower,
 };
 use rw_message::{AdMessage, AdMessageIter, GwMessage, TagMessage};
+use std::{collections::HashMap, net::IpAddr, sync::Arc};
 use warp::{reply::Reply, Filter};
 
 mod metrics;
@@ -212,8 +212,21 @@ fn metrics(
     collect_metrics(&state)
 }
 
+#[derive(Parser)]
+#[command(version, about)]
+struct Config {
+    /// Port to listen on
+    #[arg(short, long, default_value_t = 9000)]
+    port: u16,
+
+    /// Interface to bind to
+    #[arg(short, long, default_value = "0.0.0.0")]
+    interface: String,
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
+    let config = Config::parse();
     let sensor_state = Arc::new(Mutex::new(Measurements::new()));
 
     let post_measurements = warp::post()
@@ -234,7 +247,8 @@ async fn main() {
         }))
         .map(metrics);
 
+    println!("Starting server on {}:{}", config.interface, config.port);
     warp::serve(post_measurements.or(metrics))
-        .run(([0, 0, 0, 0], 9000))
+        .run((config.interface.parse::<IpAddr>().unwrap(), config.port))
         .await;
 }
