@@ -6,7 +6,8 @@ use ruuvi_sensor_protocol::{
     SensorValues, Temperature, TransmitterPower,
 };
 use rw_message::{AdMessage, AdMessageIter, GwMessage, TagMessage};
-use std::{collections::HashMap, net::IpAddr, sync::Arc};
+use serde::Deserialize;
+use std::{collections::HashMap, fs::File, io::BufReader, net::IpAddr, path::PathBuf, sync::Arc};
 use warp::{reply::Reply, Filter};
 
 mod metrics;
@@ -81,13 +82,30 @@ fn post_measurements(
     warp::reply::with_header("", "X-Ruuvi-Gateway-Rate", "1")
 }
 
-fn collect_metrics(state: &Measurements) -> String {
+#[derive(Debug, Deserialize, Default)]
+struct MacMapping {
+    #[serde(default)]
+    names: HashMap<String, String>,
+}
+
+impl MacMapping {
+    fn lookup(&self, mac: &str) -> Option<&str> {
+        self.names.get(mac).map(|s| s.as_str())
+    }
+}
+
+fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
     let mut metrics = Vec::new();
 
-    // Gateway metrics
+    // Gateway metrics with optional name
+    let mut gw_labels = labelset().label("gw_mac", &state.mac);
+    if let Some(name) = names.lookup(&state.mac) {
+        gw_labels = gw_labels.label("name", name);
+    }
+
     metrics.push(
         metric("ruuvi_gateway_update_timestamp_seconds")
-            .label("gw_mac", &state.mac)
+            .labels(&gw_labels)
             .value(state.last_update.to_unix_seconds())
             .to_string(),
     );
@@ -95,15 +113,19 @@ fn collect_metrics(state: &Measurements) -> String {
     if let Some(nonce) = state.last_nonce {
         metrics.push(
             metric("ruuvi_gateway_nonce")
-                .label("gw_mac", &state.mac)
+                .labels(&gw_labels)
                 .value(nonce)
                 .to_string(),
         );
     }
 
     // Tag metrics
-    for (name, tag) in &state.tags {
-        let labels = labelset().label("mac", name).label("gw_mac", &state.mac);
+    for (mac, tag) in &state.tags {
+        let mut labels = labelset().label("mac", mac).label("gw_mac", &state.mac);
+
+        if let Some(name) = names.lookup(mac) {
+            labels = labels.label("name", name);
+        }
 
         // Timestamps and sequence numbers
         metrics.push(
@@ -207,9 +229,10 @@ fn collect_metrics(state: &Measurements) -> String {
 
 fn metrics(
     sensor_state: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Measurements>>,
+    names: Arc<MacMapping>,
 ) -> impl Reply {
     let state = sensor_state.lock();
-    collect_metrics(&state)
+    collect_metrics(&state, &names)
 }
 
 #[derive(Parser)]
@@ -222,11 +245,27 @@ struct Config {
     /// Interface to bind to
     #[arg(short, long, default_value = "0.0.0.0")]
     interface: String,
+
+    /// Path to YAML config file with MAC address mappings
+    #[arg(short, long)]
+    mac_mapping: Option<PathBuf>,
 }
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let config = Config::parse();
+
+    // Load MAC address mappings if config file is specified, otherwise use empty mapping
+    let names = config.mac_mapping.map_or_else(
+        || MacMapping::default(),
+        |path| {
+            let file = File::open(path).expect("Failed to open config file");
+            let reader = BufReader::new(file);
+            serde_yaml::from_reader(reader).expect("Failed to parse config file")
+        },
+    );
+    let names = Arc::new(names);
+
     let sensor_state = Arc::new(Mutex::new(Measurements::new()));
 
     let post_measurements = warp::post()
@@ -244,6 +283,10 @@ async fn main() {
         .and(warp::any().map({
             let sensor_state = sensor_state.clone();
             move || sensor_state.clone()
+        }))
+        .and(warp::any().map({
+            let names = names.clone();
+            move || names.clone()
         }))
         .map(metrics);
 
