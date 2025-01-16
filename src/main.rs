@@ -81,174 +81,135 @@ fn post_measurements(
     warp::reply::with_header("", "X-Ruuvi-Gateway-Rate", "1")
 }
 
-fn metrics(
-    sensor_state: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Measurements>>,
-) -> impl Reply {
-    use std::fmt::Write;
-    let mut res = String::new();
+fn collect_metrics(state: &Measurements) -> String {
+    let mut metrics = Vec::new();
 
-    let state = sensor_state.lock();
-
-    // Export gateway statistics
-    writeln!(
-        &mut res,
-        "{}",
+    // Gateway metrics
+    metrics.push(
         metric("ruuvi_gateway_update_timestamp_seconds")
             .label("gw_mac", &state.mac)
             .value(state.last_update.to_unix_seconds())
-    )
-    .unwrap();
+            .to_string(),
+    );
 
     if let Some(nonce) = state.last_nonce {
-        writeln!(
-            &mut res,
-            "{}",
+        metrics.push(
             metric("ruuvi_gateway_nonce")
                 .label("gw_mac", &state.mac)
                 .value(nonce)
-        )
-        .unwrap();
+                .to_string(),
+        );
     }
 
+    // Tag metrics
     for (name, tag) in &state.tags {
         let labels = labelset().label("mac", name).label("gw_mac", &state.mac);
 
-        // Export tag last seen timestamp
-        writeln!(
-            &mut res,
-            "{}",
+        // Timestamps and sequence numbers
+        metrics.push(
             metric("ruuvi_tag_last_seen_timestamp_seconds")
                 .labels(&labels)
                 .value(tag.last_seen.to_unix_seconds())
-        )
-        .unwrap();
+                .to_string(),
+        );
 
-        // Sequence number
         if let Some(sequence_number) = tag.values.measurement_sequence_number() {
-            writeln!(
-                &mut res,
-                "{}",
+            metrics.push(
                 metric("ruuvi_tag_sequence_number")
                     .labels(&labels)
                     .value(sequence_number)
-            )
-            .unwrap();
+                    .to_string(),
+            );
         }
 
-        // Temperature (convert from millikelvin to celsius)
+        // Environmental measurements
         if let Some(temp_mk) = tag.values.temperature_as_millikelvins() {
-            let temp_celsius = (f64::from(temp_mk) / 1000.0) - 273.15;
-            writeln!(
-                &mut res,
-                "{}",
+            metrics.push(
                 metric("ruuvi_tag_temperature_celsius")
                     .labels(&labels)
-                    .value(temp_celsius)
-            )
-            .unwrap();
+                    .value((f64::from(temp_mk) / 1000.0) - 273.15)
+                    .to_string(),
+            );
         }
 
-        // Humidity (convert from ppm to percentage)
         if let Some(humidity_ppm) = tag.values.humidity_as_ppm() {
-            let humidity_percent = f64::from(humidity_ppm) / 1e6;
-            writeln!(
-                &mut res,
-                "{}",
+            metrics.push(
                 metric("ruuvi_tag_humidity_ratio")
                     .labels(&labels)
-                    .value(humidity_percent)
-            )
-            .unwrap();
+                    .value(f64::from(humidity_ppm) / 1e6)
+                    .to_string(),
+            );
         }
 
-        // Pressure (keep pascal)
         if let Some(pressure) = tag.values.pressure_as_pascals() {
-            writeln!(
-                &mut res,
-                "{}",
+            metrics.push(
                 metric("ruuvi_tag_pressure_pascals")
                     .labels(&labels)
                     .value(pressure)
-            )
-            .unwrap();
+                    .to_string(),
+            );
         }
-
-        // Battery (convert from mV to V)
-        if let Some(battery_mv) = tag.values.battery_potential_as_millivolts() {
-            let battery_v = f64::from(battery_mv) / 1000.0;
-            writeln!(
-                &mut res,
-                "{}",
-                metric("ruuvi_tag_battery_volts")
-                    .labels(&labels)
-                    .value(battery_v)
-            )
-            .unwrap();
-        }
-
-        // Tx Power (keep dBm)
-        if let Some(tx_power) = tag.values.tx_power_as_dbm() {
-            writeln!(
-                &mut res,
-                "{}",
-                metric("ruuvi_tag_tx_power_dBm")
-                    .labels(&labels)
-                    .value(tx_power)
-            )
-            .unwrap();
-        }
-
-        // Movement counter (unitless)
+        // Movement and acceleration
         if let Some(moves) = tag.values.movement_counter() {
-            writeln!(
-                &mut res,
-                "{}",
+            metrics.push(
                 metric("ruuvi_tag_movement_counter")
                     .labels(&labels)
                     .value(moves)
-            )
-            .unwrap();
+                    .to_string(),
+            );
         }
 
-        // Acceleration
         if let Some(acceleration) = tag.values.acceleration_vector_as_milli_g() {
-            writeln!(
-                &mut res,
-                "{}",
-                metric("ruuvi_tag_acceleration_x_g")
-                    .labels(&labels)
-                    .value(f64::from(acceleration.0) / 1000.0)
-            )
-            .unwrap();
-            writeln!(
-                &mut res,
-                "{}",
-                metric("ruuvi_tag_acceleration_y_g")
-                    .labels(&labels)
-                    .value(f64::from(acceleration.1) / 1000.0)
-            )
-            .unwrap();
-            writeln!(
-                &mut res,
-                "{}",
-                metric("ruuvi_tag_acceleration_z_g")
-                    .labels(&labels)
-                    .value(f64::from(acceleration.2) / 1000.0)
-            )
-            .unwrap();
+            for (axis, value) in [
+                ('x', acceleration.0),
+                ('y', acceleration.1),
+                ('z', acceleration.2),
+            ] {
+                metrics.push(
+                    metric(&format!("ruuvi_tag_acceleration_{}_g", axis))
+                        .labels(&labels)
+                        .value(f64::from(value) / 1000.0)
+                        .to_string(),
+                );
+            }
         }
 
-        // RSSI (keep dBm)
-        writeln!(
-            &mut res,
-            "{}",
-            metric("ruuvi_tag_rssi_dBm").labels(&labels).value(tag.rssi)
-        )
-        .unwrap();
-    }
-    drop(state);
+        // Device status
+        if let Some(battery_mv) = tag.values.battery_potential_as_millivolts() {
+            metrics.push(
+                metric("ruuvi_tag_battery_volts")
+                    .labels(&labels)
+                    .value(f64::from(battery_mv) / 1000.0)
+                    .to_string(),
+            );
+        }
 
-    res
+        if let Some(tx_power) = tag.values.tx_power_as_dbm() {
+            metrics.push(
+                metric("ruuvi_tag_tx_power_dBm")
+                    .labels(&labels)
+                    .value(tx_power)
+                    .to_string(),
+            );
+        }
+
+        // Signal strength
+        metrics.push(
+            metric("ruuvi_tag_rssi_dBm")
+                .labels(&labels)
+                .value(tag.rssi)
+                .to_string(),
+        );
+    }
+
+    metrics.join("\n") + "\n"
+}
+
+fn metrics(
+    sensor_state: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Measurements>>,
+) -> impl Reply {
+    let state = sensor_state.lock();
+    collect_metrics(&state)
 }
 
 #[tokio::main(flavor = "current_thread")]
