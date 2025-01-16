@@ -23,6 +23,8 @@ struct Tag {
 
 struct Measurements {
     last_update: Epoch,
+    last_nonce: Option<u64>,
+    mac: String,
     tags: HashMap<String, Tag>,
 }
 
@@ -30,6 +32,8 @@ impl Measurements {
     pub fn new() -> Self {
         Self {
             last_update: hifitime::UNIX_REF_EPOCH, // Hopefully far enough in the history
+            last_nonce: None,
+            mac: String::new(),
             tags: Default::default(),
         }
     }
@@ -67,6 +71,8 @@ fn post_measurements(
 ) -> impl Reply {
     let mut state = sensor_state.lock();
     state.last_update = data.timestamp;
+    state.last_nonce = Some(data.nonce);
+    state.mac = data.gw_mac;
     for tag in data.tags {
         state.update_tag(tag);
     }
@@ -83,17 +89,29 @@ fn metrics(
 
     let state = sensor_state.lock();
 
-    // Export gateway last seen timestamp
+    // Export gateway statistics
     writeln!(
         &mut res,
         "{}",
-        metric("ruuvi_gateway_last_update_timestamp_seconds")
+        metric("ruuvi_gateway_update_timestamp_seconds")
+            .label("gw_mac", &state.mac)
             .value(state.last_update.to_unix_seconds())
     )
     .unwrap();
 
+    if let Some(nonce) = state.last_nonce {
+        writeln!(
+            &mut res,
+            "{}",
+            metric("ruuvi_gateway_nonce")
+                .label("gw_mac", &state.mac)
+                .value(nonce)
+        )
+        .unwrap();
+    }
+
     for (name, tag) in &state.tags {
-        let labels = labelset().label("mac", name);
+        let labels = labelset().label("mac", name).label("gw_mac", &state.mac);
 
         // Export tag last seen timestamp
         writeln!(
