@@ -66,6 +66,7 @@ fn post_measurements(
     sensor_state: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Measurements>>,
 ) -> impl Reply {
     let mut state = sensor_state.lock();
+    state.last_update = data.timestamp;
     for tag in data.tags {
         state.update_tag(tag);
     }
@@ -81,15 +82,35 @@ fn metrics(
     let mut res = String::new();
 
     let state = sensor_state.lock();
+
+    // Export gateway last seen timestamp
+    writeln!(
+        &mut res,
+        "{}",
+        metric("ruuvi_gateway_last_update_timestamp_seconds")
+            .value(state.last_update.to_unix_seconds())
+    )
+    .unwrap();
+
     for (name, tag) in &state.tags {
         let labels = labelset().label("mac", name);
+
+        // Export tag last seen timestamp
+        writeln!(
+            &mut res,
+            "{}",
+            metric("ruuvi_tag_last_seen_timestamp_seconds")
+                .labels(&labels)
+                .value(tag.last_seen.to_unix_seconds())
+        )
+        .unwrap();
 
         // Sequence number
         if let Some(sequence_number) = tag.values.measurement_sequence_number() {
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_sequence_number")
+                metric("ruuvi_tag_sequence_number")
                     .labels(&labels)
                     .value(sequence_number)
             )
@@ -102,7 +123,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_temperature_celsius")
+                metric("ruuvi_tag_temperature_celsius")
                     .labels(&labels)
                     .value(temp_celsius)
             )
@@ -115,7 +136,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_humidity_ratio")
+                metric("ruuvi_tag_humidity_ratio")
                     .labels(&labels)
                     .value(humidity_percent)
             )
@@ -127,7 +148,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_pressure_pascals")
+                metric("ruuvi_tag_pressure_pascals")
                     .labels(&labels)
                     .value(pressure)
             )
@@ -140,7 +161,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_battery_volts")
+                metric("ruuvi_tag_battery_volts")
                     .labels(&labels)
                     .value(battery_v)
             )
@@ -152,7 +173,9 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_tx_power_dBm").labels(&labels).value(tx_power)
+                metric("ruuvi_tag_tx_power_dBm")
+                    .labels(&labels)
+                    .value(tx_power)
             )
             .unwrap();
         }
@@ -162,7 +185,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_movement_counter")
+                metric("ruuvi_tag_movement_counter")
                     .labels(&labels)
                     .value(moves)
             )
@@ -174,7 +197,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_acceleration_x_g")
+                metric("ruuvi_tag_acceleration_x_g")
                     .labels(&labels)
                     .value(f64::from(acceleration.0) / 1000.0)
             )
@@ -182,7 +205,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_acceleration_y_g")
+                metric("ruuvi_tag_acceleration_y_g")
                     .labels(&labels)
                     .value(f64::from(acceleration.1) / 1000.0)
             )
@@ -190,7 +213,7 @@ fn metrics(
             writeln!(
                 &mut res,
                 "{}",
-                metric("ruuvi_acceleration_z_g")
+                metric("ruuvi_tag_acceleration_z_g")
                     .labels(&labels)
                     .value(f64::from(acceleration.2) / 1000.0)
             )
@@ -201,7 +224,7 @@ fn metrics(
         writeln!(
             &mut res,
             "{}",
-            metric("ruuvi_rssi_dBm").labels(&labels).value(tag.rssi)
+            metric("ruuvi_tag_rssi_dBm").labels(&labels).value(tag.rssi)
         )
         .unwrap();
     }
