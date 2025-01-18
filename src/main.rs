@@ -84,7 +84,7 @@ fn post_measurements(
 
 #[derive(Debug, Deserialize, Default)]
 struct MacMapping {
-    #[serde(default)]
+    #[serde(default, flatten)]
     names: HashMap<String, String>,
 }
 
