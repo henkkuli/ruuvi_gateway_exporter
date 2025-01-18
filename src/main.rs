@@ -134,11 +134,11 @@ fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
         }
 
         // Environmental measurements
-        if let Some(temp_mk) = tag.values.temperature_as_millikelvins() {
+        if let Some(temp_mc) = tag.values.temperature_as_millicelsius() {
             metrics.push(
                 metric("ruuvi_tag_temperature_celsius")
                     .labels(&labels)
-                    .value((f64::from(temp_mk) / 1000.0) - 273.15)
+                    .value((f64::from(temp_mc) / 1000.0))
                     .to_string(),
             );
         }
