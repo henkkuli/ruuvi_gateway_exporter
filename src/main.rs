@@ -6,13 +6,14 @@ use ruuvi_sensor_protocol::{
     SensorValues, Temperature, TransmitterPower,
 };
 use rw_message::{AdMessage, AdMessageIter, GwMessage, TagMessage};
-use serde::Deserialize;
-use std::{collections::HashMap, fs::File, io::BufReader, net::IpAddr, path::PathBuf, sync::Arc};
+use std::{collections::HashMap, net::IpAddr, sync::Arc};
 use warp::{reply::Reply, Filter};
 
+mod config;
 mod metrics;
 mod rw_message;
 
+use config::{Config, MacMapping};
 use metrics::{labelset, metric};
 
 #[derive(Debug)]
@@ -80,18 +81,6 @@ fn post_measurements(
     drop(state);
 
     warp::reply::with_header("", "X-Ruuvi-Gateway-Rate", "1")
-}
-
-#[derive(Debug, Deserialize, Default)]
-struct MacMapping {
-    #[serde(default, flatten)]
-    names: HashMap<String, String>,
-}
-
-impl MacMapping {
-    fn lookup(&self, mac: &str) -> Option<&str> {
-        self.names.get(mac).map(|s| s.as_str())
-    }
 }
 
 fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
@@ -235,22 +224,6 @@ fn metrics(
     collect_metrics(&state, &names)
 }
 
-#[derive(Parser)]
-#[command(version, about)]
-struct Config {
-    /// Port to listen on
-    #[arg(short, long, default_value_t = 9000)]
-    port: u16,
-
-    /// Interface to bind to
-    #[arg(short, long, default_value = "0.0.0.0")]
-    interface: String,
-
-    /// Path to YAML config file with MAC address mappings
-    #[arg(short, long)]
-    mac_mapping: Option<PathBuf>,
-}
-
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
     let config = Config::parse();
@@ -258,11 +231,7 @@ async fn main() {
     // Load MAC address mappings if config file is specified, otherwise use empty mapping
     let names = config.mac_mapping.map_or_else(
         || MacMapping::default(),
-        |path| {
-            let file = File::open(path).expect("Failed to open config file");
-            let reader = BufReader::new(file);
-            serde_yaml::from_reader(reader).expect("Failed to parse config file")
-        },
+        |path| MacMapping::load(&path).expect("Failed to load MAC mapping file"),
     );
     let names = Arc::new(names);
 
