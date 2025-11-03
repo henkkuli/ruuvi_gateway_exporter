@@ -101,7 +101,7 @@ impl fmt::Display for AdMessageParseError {
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AdMessageIter<'d>(pub &'d [u8]);
 
-impl<'d> Iterator for AdMessageIter<'d> {
+impl Iterator for AdMessageIter<'_> {
     type Item = Result<AdMessage, AdMessageParseError>;
 
     fn next(&mut self) -> Option<Self::Item> {

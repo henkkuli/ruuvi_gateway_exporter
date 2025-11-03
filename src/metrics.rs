@@ -55,7 +55,7 @@ impl<'a> MetricBuilder<'a> {
     }
 }
 
-impl<'a, V: fmt::Display> fmt::Display for Metric<'a, V> {
+impl<V: fmt::Display> fmt::Display for Metric<'_, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.name)?;
         if !self.labels.is_empty() {
@@ -64,7 +64,7 @@ impl<'a, V: fmt::Display> fmt::Display for Metric<'a, V> {
                 if i > 0 {
                     write!(f, ",")?;
                 }
-                write!(f, "{}=\"{}\"", key, value)?;
+                write!(f, "{key}=\"{value}\"")?;
             }
             write!(f, "}}")?;
         }

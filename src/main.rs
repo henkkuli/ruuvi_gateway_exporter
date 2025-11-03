@@ -14,6 +14,7 @@ use collector::collect_metrics;
 use config::{Config, MacMapping};
 use measurements::Measurements;
 
+#[allow(clippy::needless_pass_by_value)]
 fn post_measurements(
     data: GwMessage,
     sensor_state: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Measurements>>,
@@ -22,7 +23,7 @@ fn post_measurements(
     state.last_update = data.timestamp;
     state.last_nonce = Some(data.nonce);
     state.mac = data.gw_mac;
-    for tag in data.tags {
+    for tag in &data.tags {
         state.update_tag(tag);
     }
     drop(state);
@@ -30,6 +31,7 @@ fn post_measurements(
     warp::reply::with_header("", "X-Ruuvi-Gateway-Rate", "1")
 }
 
+#[allow(clippy::needless_pass_by_value)]
 fn metrics(
     sensor_state: Arc<parking_lot::lock_api::Mutex<parking_lot::RawMutex, Measurements>>,
     names: Arc<MacMapping>,
@@ -44,7 +46,7 @@ async fn main() {
 
     // Load MAC address mappings if config file is specified, otherwise use empty mapping
     let names = config.mac_mapping.map_or_else(
-        || MacMapping::default(),
+        MacMapping::default,
         |path| MacMapping::load(&path).expect("Failed to load MAC mapping file"),
     );
     let names = Arc::new(names);

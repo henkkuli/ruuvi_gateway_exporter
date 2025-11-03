@@ -31,7 +31,7 @@ pub struct MacMapping {
 
 impl MacMapping {
     pub fn lookup(&self, mac: &str) -> Option<&str> {
-        self.names.get(mac).map(|s| s.as_str())
+        self.names.get(mac).map(String::as_str)
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, Box<dyn std::error::Error>> {

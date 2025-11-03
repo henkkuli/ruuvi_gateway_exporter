@@ -68,6 +68,7 @@ fn add_air_quality_metrics(
     add_optional_metric(metrics, "ruuvi_tag_luminosity_lux", labels, luminosity);
 }
 
+#[allow(clippy::too_many_lines)]
 pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
     let mut metrics = Vec::new();
 
@@ -116,7 +117,7 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                 add_common_environmental_metrics(
                     &mut metrics,
                     &labels,
-                    data.measurement_sequence.map(|s| s as u32),
+                    data.measurement_sequence.map(u32::from),
                     data.temperature,
                     data.humidity,
                     data.pressure, // TODO: The doc says that it should be in hPa, but in actuality is it in Pa.
@@ -138,7 +139,7 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                     for (axis, value) in [('x', x), ('y', y), ('z', z)] {
                         add_metric(
                             &mut metrics,
-                            &format!("ruuvi_tag_acceleration_{}_g", axis),
+                            &format!("ruuvi_tag_acceleration_{axis}_g"),
                             &labels,
                             f64::from(value) / 1000.0,
                         );
@@ -164,7 +165,7 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                 add_common_environmental_metrics(
                     &mut metrics,
                     &labels,
-                    data.measurement_sequence.map(|s| s as u32),
+                    data.measurement_sequence.map(u32::from),
                     data.temperature,
                     data.humidity,
                     data.pressure.map(|p| p * 100.0),
@@ -249,7 +250,7 @@ mod tests {
             timestamp: Epoch::from_unix_seconds(1234567890.0),
             rssi: -50,
         };
-        measurements.update_tag(tag_msg);
+        measurements.update_tag(&tag_msg);
 
         let names = MacMapping::default();
         let output = collect_metrics(&measurements, &names);
@@ -300,7 +301,7 @@ mod tests {
             timestamp: Epoch::from_unix_seconds(1609459210.0), // 10 seconds after gateway
             rssi: -55,
         };
-        measurements.update_tag(tag_msg);
+        measurements.update_tag(&tag_msg);
 
         // Add an E1 sensor with air quality data
         let e1_data =
@@ -311,7 +312,7 @@ mod tests {
             timestamp: Epoch::from_unix_seconds(1609459220.0), // 20 seconds after gateway
             rssi: -65,
         };
-        measurements.update_tag(e1_tag_msg);
+        measurements.update_tag(&e1_tag_msg);
 
         // Create mapping with names
         let yaml = r#"

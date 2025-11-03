@@ -24,11 +24,11 @@ impl Measurements {
             last_update: hifitime::UNIX_REF_EPOCH, // Hopefully far enough in the history
             last_nonce: None,
             mac: String::new(),
-            tags: Default::default(),
+            tags: HashMap::default(),
         }
     }
 
-    pub fn update_tag(&mut self, tag: TagMessage) {
+    pub fn update_tag(&mut self, tag: &TagMessage) {
         let msgs = AdMessageIter(&tag.data);
 
         // Find the last Ruuvi manufacturer-specific data (ad_type 0xff)
@@ -92,7 +92,7 @@ mod tests {
         };
 
         let mut measurements = Measurements::new();
-        measurements.update_tag(tag);
+        measurements.update_tag(&tag);
 
         assert_eq!(measurements.tags.len(), 1);
         assert!(measurements.tags.contains_key("DD:19:92:CB:60:21"));
@@ -112,7 +112,7 @@ mod tests {
         };
 
         let mut measurements = Measurements::new();
-        measurements.update_tag(tag);
+        measurements.update_tag(&tag);
 
         // Tag should be added since E1 format is now supported
         assert_eq!(measurements.tags.len(), 1);
@@ -135,7 +135,7 @@ mod tests {
         };
 
         let mut measurements = Measurements::new();
-        measurements.update_tag(tag);
+        measurements.update_tag(&tag);
 
         // Tag should not be added since there's no manufacturer data
         assert_eq!(measurements.tags.len(), 0);
