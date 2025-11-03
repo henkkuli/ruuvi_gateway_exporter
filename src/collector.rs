@@ -206,4 +206,57 @@ mod tests {
 
         assert!(output.contains("name=\"Gateway 1\""));
     }
+
+    #[test]
+    fn test_collect_metrics_full_output() {
+        // This test validates the complete output format to ensure refactoring
+        // doesn't accidentally change the behavior of the system
+        let mut measurements = Measurements::new();
+        measurements.mac = "AA:BB:CC:DD:EE:FF".to_string();
+        measurements.last_update = Epoch::from_unix_seconds(1609459200.0); // 2021-01-01 00:00:00 UTC
+        measurements.last_nonce = Some(42);
+
+        // Add a tag with complete data using RuuviTag format v5
+        // Data format: 0x05 | temp | humidity | pressure | accel_x | accel_y | accel_z | battery+power | movement | sequence
+        let data =
+            hex::decode("0201061BFF9904050FE0337CC4ABFC1400340024A5B6EBA544DD1992CB6021").unwrap();
+        let tag_msg = TagMessage {
+            name: "DD:19:92:CB:60:21".to_string(),
+            data,
+            timestamp: Epoch::from_unix_seconds(1609459210.0), // 10 seconds after gateway
+            rssi: -55,
+        };
+        measurements.update_tag(tag_msg);
+
+        // Create mapping with names
+        let yaml = r#"
+            "AA:BB:CC:DD:EE:FF": "Test Gateway"
+            "DD:19:92:CB:60:21": "Living Room"
+        "#;
+        let mut temp_file = tempfile::NamedTempFile::new().unwrap();
+        use std::io::Write;
+        write!(temp_file, "{}", yaml).unwrap();
+        let names = MacMapping::load(temp_file.path()).unwrap();
+
+        let output = collect_metrics(&measurements, &names);
+
+        // Expected output (order and exact format matter for this test)
+        let expected = r#"ruuvi_gateway_update_timestamp_seconds{gw_mac="AA:BB:CC:DD:EE:FF",name="Test Gateway"} 1609459200
+ruuvi_gateway_nonce{gw_mac="AA:BB:CC:DD:EE:FF",name="Test Gateway"} 42
+ruuvi_tag_last_seen_timestamp_seconds{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 1609459210
+ruuvi_tag_sequence_number{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 42308
+ruuvi_tag_temperature_celsius{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 20.32
+ruuvi_tag_humidity_ratio{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 0.3295
+ruuvi_tag_pressure_pascals{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 100347
+ruuvi_tag_movement_counter{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 235
+ruuvi_tag_acceleration_x_g{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} -1.004
+ruuvi_tag_acceleration_y_g{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 0.052
+ruuvi_tag_acceleration_z_g{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 0.036
+ruuvi_tag_battery_volts{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 2.925
+ruuvi_tag_tx_power_dBm{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 4
+ruuvi_tag_rssi_dBm{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} -55
+"#;
+
+        assert_eq!(output, expected, "Output format has changed!");
+    }
 }
