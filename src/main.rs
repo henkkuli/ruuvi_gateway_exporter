@@ -4,15 +4,15 @@ use rw_message::GwMessage;
 use std::{net::IpAddr, sync::Arc};
 use warp::{reply::Reply, Filter};
 
+mod collector;
 mod config;
 mod measurements;
 mod metrics;
 mod rw_message;
-mod collector;
 
+use collector::collect_metrics;
 use config::{Config, MacMapping};
 use measurements::Measurements;
-use collector::collect_metrics;
 
 fn post_measurements(
     data: GwMessage,

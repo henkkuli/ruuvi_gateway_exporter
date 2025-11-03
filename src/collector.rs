@@ -127,9 +127,11 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                     data.movement_counter,
                 );
 
-                if let (Some(x), Some(y), Some(z)) =
-                    (data.acceleration_x, data.acceleration_y, data.acceleration_z)
-                {
+                if let (Some(x), Some(y), Some(z)) = (
+                    data.acceleration_x,
+                    data.acceleration_y,
+                    data.acceleration_z,
+                ) {
                     for (axis, value) in [('x', x), ('y', y), ('z', z)] {
                         add_metric(
                             &mut metrics,
