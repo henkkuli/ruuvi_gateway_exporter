@@ -1,71 +1,21 @@
 use clap::Parser;
-use hifitime::Epoch;
 use parking_lot::Mutex;
 use ruuvi_sensor_protocol::{
     Acceleration, BatteryPotential, Humidity, MeasurementSequenceNumber, MovementCounter, Pressure,
-    SensorValues, Temperature, TransmitterPower,
+    Temperature, TransmitterPower,
 };
-use rw_message::{AdMessage, AdMessageIter, GwMessage, TagMessage};
-use std::{collections::HashMap, net::IpAddr, sync::Arc};
+use rw_message::GwMessage;
+use std::{net::IpAddr, sync::Arc};
 use warp::{reply::Reply, Filter};
 
 mod config;
+mod measurements;
 mod metrics;
 mod rw_message;
 
 use config::{Config, MacMapping};
+use measurements::Measurements;
 use metrics::{labelset, metric};
-
-#[derive(Debug)]
-struct Tag {
-    last_seen: Epoch,
-    rssi: i32,
-    values: SensorValues,
-}
-
-struct Measurements {
-    last_update: Epoch,
-    last_nonce: Option<u64>,
-    mac: String,
-    tags: HashMap<String, Tag>,
-}
-
-impl Measurements {
-    pub fn new() -> Self {
-        Self {
-            last_update: hifitime::UNIX_REF_EPOCH, // Hopefully far enough in the history
-            last_nonce: None,
-            mac: String::new(),
-            tags: Default::default(),
-        }
-    }
-
-    pub fn update_tag(&mut self, tag: TagMessage) {
-        let mut msgs = AdMessageIter(&tag.data);
-        assert_eq!(
-            msgs.next(),
-            Some(Ok(AdMessage {
-                ad_type: 1,
-                payload: vec![6]
-            }))
-        );
-        let data = msgs.next().unwrap().unwrap();
-        assert_eq!(data.ad_type, 0xff);
-        assert_eq!(msgs.next(), None);
-        let (manufacturer_id, payload) = data.payload.split_at(2);
-        let manufacturer_id = u16::from_le_bytes([manufacturer_id[0], manufacturer_id[1]]);
-        let values =
-            SensorValues::from_manufacturer_specific_data(manufacturer_id, payload).unwrap(); // TODO: Don'tag unwrap
-
-        let t = Tag {
-            last_seen: tag.timestamp,
-            rssi: tag.rssi,
-            values,
-        };
-
-        self.tags.insert(tag.name, t);
-    }
-}
 
 fn post_measurements(
     data: GwMessage,
@@ -138,7 +88,7 @@ fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
             metrics.push(
                 metric("ruuvi_tag_temperature_celsius")
                     .labels(&labels)
-                    .value((f64::from(temp_mc) / 1000.0))
+                    .value(f64::from(temp_mc) / 1000.0)
                     .to_string(),
             );
         }
