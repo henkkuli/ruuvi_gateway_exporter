@@ -23,6 +23,51 @@ fn add_optional_metric<T: std::fmt::Display>(
     }
 }
 
+fn add_common_environmental_metrics(
+    metrics: &mut Vec<String>,
+    labels: &LabelSet,
+    measurement_sequence: Option<u32>,
+    temperature: Option<f64>,
+    humidity: Option<f64>,
+    pressure: Option<f64>,
+) {
+    add_optional_metric(
+        metrics,
+        "ruuvi_tag_sequence_number",
+        labels,
+        measurement_sequence,
+    );
+    add_optional_metric(
+        metrics,
+        "ruuvi_tag_temperature_celsius",
+        labels,
+        temperature,
+    );
+    add_optional_metric(
+        metrics,
+        "ruuvi_tag_humidity_ratio",
+        labels,
+        humidity.map(|h| h / 100.0),
+    );
+    add_optional_metric(metrics, "ruuvi_tag_pressure_pascals", labels, pressure);
+}
+
+fn add_air_quality_metrics(
+    metrics: &mut Vec<String>,
+    labels: &LabelSet,
+    pm2_5: Option<f64>,
+    co2: Option<u16>,
+    voc_index: Option<u16>,
+    nox_index: Option<u16>,
+    luminosity: Option<f64>,
+) {
+    add_optional_metric(metrics, "ruuvi_tag_pm2_5_ugm3", labels, pm2_5);
+    add_optional_metric(metrics, "ruuvi_tag_co2_ppm", labels, co2);
+    add_optional_metric(metrics, "ruuvi_tag_voc_index", labels, voc_index);
+    add_optional_metric(metrics, "ruuvi_tag_nox_index", labels, nox_index);
+    add_optional_metric(metrics, "ruuvi_tag_luminosity_lux", labels, luminosity);
+}
+
 pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
     let mut metrics = Vec::new();
 
@@ -65,32 +110,12 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
         // Extract data based on format
         match &tag.values {
             ruuvi_decoders::RuuviData::V5(data) => {
-                add_optional_metric(
+                add_common_environmental_metrics(
                     &mut metrics,
-                    "ruuvi_tag_sequence_number",
                     &labels,
-                    data.measurement_sequence,
-                );
-
-                // Environmental measurements
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_temperature_celsius",
-                    &labels,
+                    data.measurement_sequence.map(|s| s as u32),
                     data.temperature,
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_humidity_ratio",
-                    &labels,
-                    data.humidity.map(|h| h / 100.0),
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_pressure_pascals",
-                    &labels,
+                    data.humidity,
                     data.pressure,
                 );
 
@@ -131,87 +156,47 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                 );
             }
             ruuvi_decoders::RuuviData::V6(data) => {
-                add_optional_metric(
+                add_common_environmental_metrics(
                     &mut metrics,
-                    "ruuvi_tag_sequence_number",
                     &labels,
-                    data.measurement_sequence,
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_temperature_celsius",
-                    &labels,
+                    data.measurement_sequence.map(|s| s as u32),
                     data.temperature,
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_humidity_ratio",
-                    &labels,
-                    data.humidity.map(|h| h / 100.0),
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_pressure_pascals",
-                    &labels,
+                    data.humidity,
                     data.pressure,
                 );
 
-                // V6-specific metrics
-                add_optional_metric(&mut metrics, "ruuvi_tag_pm2_5_ugm3", &labels, data.pm2_5);
-                add_optional_metric(&mut metrics, "ruuvi_tag_co2_ppm", &labels, data.co2);
-                add_optional_metric(&mut metrics, "ruuvi_tag_voc_index", &labels, data.voc_index);
-                add_optional_metric(&mut metrics, "ruuvi_tag_nox_index", &labels, data.nox_index);
-                add_optional_metric(
+                add_air_quality_metrics(
                     &mut metrics,
-                    "ruuvi_tag_luminosity_lux",
                     &labels,
+                    data.pm2_5,
+                    data.co2,
+                    data.voc_index,
+                    data.nox_index,
                     data.luminosity,
                 );
             }
             ruuvi_decoders::RuuviData::E1(data) => {
-                add_optional_metric(
+                add_common_environmental_metrics(
                     &mut metrics,
-                    "ruuvi_tag_sequence_number",
                     &labels,
                     data.measurement_sequence,
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_temperature_celsius",
-                    &labels,
                     data.temperature,
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_humidity_ratio",
-                    &labels,
-                    data.humidity.map(|h| h / 100.0),
-                );
-
-                add_optional_metric(
-                    &mut metrics,
-                    "ruuvi_tag_pressure_pascals",
-                    &labels,
+                    data.humidity,
                     data.pressure,
                 );
 
-                // E1-specific metrics
+                // E1-specific PM metrics
                 add_optional_metric(&mut metrics, "ruuvi_tag_pm1_0_ugm3", &labels, data.pm1_0);
-                add_optional_metric(&mut metrics, "ruuvi_tag_pm2_5_ugm3", &labels, data.pm2_5);
                 add_optional_metric(&mut metrics, "ruuvi_tag_pm4_0_ugm3", &labels, data.pm4_0);
                 add_optional_metric(&mut metrics, "ruuvi_tag_pm10_0_ugm3", &labels, data.pm10_0);
-                add_optional_metric(&mut metrics, "ruuvi_tag_co2_ppm", &labels, data.co2);
-                add_optional_metric(&mut metrics, "ruuvi_tag_voc_index", &labels, data.voc_index);
-                add_optional_metric(&mut metrics, "ruuvi_tag_nox_index", &labels, data.nox_index);
-                add_optional_metric(
+
+                add_air_quality_metrics(
                     &mut metrics,
-                    "ruuvi_tag_luminosity_lux",
                     &labels,
+                    data.pm2_5,
+                    data.co2,
+                    data.voc_index,
+                    data.nox_index,
                     data.luminosity,
                 );
             }
