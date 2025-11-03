@@ -91,8 +91,11 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
         state.last_nonce,
     );
 
-    // Tag metrics
-    for (mac, tag) in &state.tags {
+    // Tag metrics - iterate in sorted order for consistent output
+    let mut sorted_tags: Vec<_> = state.tags.iter().collect();
+    sorted_tags.sort_by_key(|(mac, _)| *mac);
+
+    for (mac, tag) in sorted_tags {
         let mut labels = labelset().label("mac", mac).label("gw_mac", &state.mac);
 
         if let Some(name) = names.lookup(mac) {
@@ -116,7 +119,7 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                     data.measurement_sequence.map(|s| s as u32),
                     data.temperature,
                     data.humidity,
-                    data.pressure,
+                    data.pressure, // TODO: The doc says that it should be in hPa, but in actuality is it in Pa.
                 );
 
                 // Movement and acceleration
@@ -164,7 +167,7 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                     data.measurement_sequence.map(|s| s as u32),
                     data.temperature,
                     data.humidity,
-                    data.pressure,
+                    data.pressure.map(|p| p * 100.0),
                 );
 
                 add_air_quality_metrics(
@@ -184,7 +187,7 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
                     data.measurement_sequence,
                     data.temperature,
                     data.humidity,
-                    data.pressure,
+                    data.pressure.map(|p| p * 100.0),
                 );
 
                 // E1-specific PM metrics
@@ -299,10 +302,22 @@ mod tests {
         };
         measurements.update_tag(tag_msg);
 
+        // Add an E1 sensor with air quality data
+        let e1_data =
+            hex::decode("2BFF9904E1170C5668C79E0065007004BD11CA00C90A0213E0ACFFFFFFDECDEE10FFFFFFFFFFCBB8334C884F").unwrap();
+        let e1_tag_msg = TagMessage {
+            name: "CB:B8:33:4C:88:4F".to_string(),
+            data: e1_data,
+            timestamp: Epoch::from_unix_seconds(1609459220.0), // 20 seconds after gateway
+            rssi: -65,
+        };
+        measurements.update_tag(e1_tag_msg);
+
         // Create mapping with names
         let yaml = r#"
             "AA:BB:CC:DD:EE:FF": "Test Gateway"
             "DD:19:92:CB:60:21": "Living Room"
+            "CB:B8:33:4C:88:4F": "Office"
         "#;
         let mut temp_file = tempfile::NamedTempFile::new().unwrap();
         use std::io::Write;
@@ -314,6 +329,20 @@ mod tests {
         // Expected output (order and exact format matter for this test)
         let expected = r#"ruuvi_gateway_update_timestamp_seconds{gw_mac="AA:BB:CC:DD:EE:FF",name="Test Gateway"} 1609459200
 ruuvi_gateway_nonce{gw_mac="AA:BB:CC:DD:EE:FF",name="Test Gateway"} 42
+ruuvi_tag_last_seen_timestamp_seconds{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 1609459220
+ruuvi_tag_sequence_number{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 14601710
+ruuvi_tag_temperature_celsius{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 29.5
+ruuvi_tag_humidity_ratio{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 0.553
+ruuvi_tag_pressure_pascals{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 101102
+ruuvi_tag_pm1_0_ugm3{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 10.100000000000001
+ruuvi_tag_pm4_0_ugm3{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 121.30000000000001
+ruuvi_tag_pm10_0_ugm3{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 455.40000000000003
+ruuvi_tag_pm2_5_ugm3{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 11.200000000000001
+ruuvi_tag_co2_ppm{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 201
+ruuvi_tag_voc_index{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 20
+ruuvi_tag_nox_index{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 4
+ruuvi_tag_luminosity_lux{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} 13027
+ruuvi_tag_rssi_dBm{mac="CB:B8:33:4C:88:4F",gw_mac="AA:BB:CC:DD:EE:FF",name="Office"} -65
 ruuvi_tag_last_seen_timestamp_seconds{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 1609459210
 ruuvi_tag_sequence_number{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 42308
 ruuvi_tag_temperature_celsius{mac="DD:19:92:CB:60:21",gw_mac="AA:BB:CC:DD:EE:FF",name="Living Room"} 20.32
