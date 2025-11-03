@@ -2,7 +2,7 @@ use hifitime::Epoch;
 use ruuvi_sensor_protocol::SensorValues;
 use std::collections::HashMap;
 
-use crate::rw_message::{AdMessage, AdMessageIter, TagMessage};
+use crate::rw_message::{AdMessageIter, TagMessage};
 
 #[derive(Debug)]
 pub struct Tag {
@@ -29,28 +29,117 @@ impl Measurements {
     }
 
     pub fn update_tag(&mut self, tag: TagMessage) {
-        let mut msgs = AdMessageIter(&tag.data);
-        assert_eq!(
-            msgs.next(),
-            Some(Ok(AdMessage {
-                ad_type: 1,
-                payload: vec![6]
-            }))
-        );
-        let data = msgs.next().unwrap().unwrap();
-        assert_eq!(data.ad_type, 0xff);
-        assert_eq!(msgs.next(), None);
-        let (manufacturer_id, payload) = data.payload.split_at(2);
-        let manufacturer_id = u16::from_le_bytes([manufacturer_id[0], manufacturer_id[1]]);
-        let values =
-            SensorValues::from_manufacturer_specific_data(manufacturer_id, payload).unwrap(); // TODO: Don'tag unwrap
+        let msgs = AdMessageIter(&tag.data);
 
-        let t = Tag {
-            last_seen: tag.timestamp,
-            rssi: tag.rssi,
-            values,
+        // Find the last Ruuvi manufacturer-specific data (ad_type 0xff)
+        // in case there are multiple advertisements
+        let mut found_ruuvi = false;
+        for msg in msgs
+            .filter_map(Result::ok)
+            .filter(|msg| msg.ad_type == 0xff)
+        {
+            if msg.payload.len() < 2 {
+                continue;
+            }
+            let (manufacturer_id, payload) = msg.payload.split_at(2);
+            let manufacturer_id = u16::from_le_bytes([manufacturer_id[0], manufacturer_id[1]]);
+            // Ruuvi manufacturer ID is 0x0499
+            if manufacturer_id == 0x0499 {
+                found_ruuvi = true;
+                if let Ok(values) =
+                    SensorValues::from_manufacturer_specific_data(manufacturer_id, payload)
+                {
+                    self.tags.insert(
+                        tag.name.clone(),
+                        Tag {
+                            last_seen: tag.timestamp,
+                            rssi: tag.rssi,
+                            values,
+                        },
+                    );
+                } else {
+                    eprintln!(
+                        "Warning: Could not parse Ruuvi data from tag {}: {}",
+                        tag.name,
+                        hex::encode_upper(&msg.payload)
+                    );
+                }
+            }
+        }
+
+        if !found_ruuvi {
+            eprintln!(
+                "Warning: No Ruuvi manufacturer data found in advertisement from tag {}",
+                tag.name,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hifitime::Epoch;
+
+    #[test]
+    fn test_update_tag_with_standard_format() {
+        // Standard format: ad_type 1 followed by ad_type 0xff
+        let data =
+            hex::decode("0201061BFF9904050FE0337CC4ABFC1400340024A5B6EBA544DD1992CB6021").unwrap();
+        let tag = TagMessage {
+            name: "DD:19:92:CB:60:21".to_string(),
+            data,
+            timestamp: Epoch::from_unix_seconds(1736885086.0),
+            rssi: -50,
         };
 
-        self.tags.insert(tag.name, t);
+        let mut measurements = Measurements::new();
+        measurements.update_tag(tag);
+
+        assert_eq!(measurements.tags.len(), 1);
+        assert!(measurements.tags.contains_key("DD:19:92:CB:60:21"));
+    }
+
+    #[test]
+    fn test_update_tag_with_unsupported_format() {
+        // E1 format that's not yet supported by ruuvi-sensor-protocol
+        let payload = vec![
+            153, 4, 225, 16, 254, 64, 140, 197, 61, 0, 3, 0, 6, 0, 9, 0, 11, 2, 86, 13, 0, 255,
+            255, 255, 255, 255, 255, 0, 30, 190, 184, 255, 255, 255, 255, 255, 246, 191, 178, 238,
+            209, 86,
+        ];
+        let mut data = vec![1 + payload.len() as u8, 0xff];
+        data.extend_from_slice(&payload);
+
+        let tag = TagMessage {
+            name: "E1:67:4C:F5:77:29".to_string(),
+            data,
+            timestamp: Epoch::from_unix_seconds(1736885086.0),
+            rssi: -60,
+        };
+
+        let mut measurements = Measurements::new();
+        measurements.update_tag(tag);
+
+        // Tag should not be added since format is unsupported
+        assert_eq!(measurements.tags.len(), 0);
+    }
+
+    #[test]
+    fn test_update_tag_without_manufacturer_data() {
+        // Only ad_type 1, no manufacturer-specific data
+        let data = hex::decode("020106").unwrap();
+        let tag = TagMessage {
+            name: "AA:BB:CC:DD:EE:FF".to_string(),
+            data,
+            timestamp: Epoch::from_unix_seconds(1736885086.0),
+            rssi: -50,
+        };
+
+        let mut measurements = Measurements::new();
+        measurements.update_tag(tag);
+
+        // Tag should not be added since there's no manufacturer data
+        assert_eq!(measurements.tags.len(), 0);
     }
 }
