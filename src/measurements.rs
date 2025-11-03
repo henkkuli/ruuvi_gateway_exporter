@@ -1,5 +1,5 @@
 use hifitime::Epoch;
-use ruuvi_sensor_protocol::SensorValues;
+use ruuvi_decoders::RuuviData;
 use std::collections::HashMap;
 
 use crate::rw_message::{AdMessageIter, TagMessage};
@@ -8,7 +8,7 @@ use crate::rw_message::{AdMessageIter, TagMessage};
 pub struct Tag {
     pub last_seen: Epoch,
     pub rssi: i32,
-    pub values: SensorValues,
+    pub values: RuuviData,
 }
 
 pub struct Measurements {
@@ -46,9 +46,7 @@ impl Measurements {
             // Ruuvi manufacturer ID is 0x0499
             if manufacturer_id == 0x0499 {
                 found_ruuvi = true;
-                if let Ok(values) =
-                    SensorValues::from_manufacturer_specific_data(manufacturer_id, payload)
-                {
+                if let Ok(values) = RuuviData::decode(payload) {
                     self.tags.insert(
                         tag.name.clone(),
                         Tag {
@@ -101,8 +99,8 @@ mod tests {
     }
 
     #[test]
-    fn test_update_tag_with_unsupported_format() {
-        // E1 format that's not yet supported by ruuvi-sensor-protocol
+    fn test_update_tag_with_e1_format() {
+        // E1 format is now supported by ruuvi-decoders
         let payload = vec![
             153, 4, 225, 16, 254, 64, 140, 197, 61, 0, 3, 0, 6, 0, 9, 0, 11, 2, 86, 13, 0, 255,
             255, 255, 255, 255, 255, 0, 30, 190, 184, 255, 255, 255, 255, 255, 246, 191, 178, 238,
@@ -121,8 +119,13 @@ mod tests {
         let mut measurements = Measurements::new();
         measurements.update_tag(tag);
 
-        // Tag should not be added since format is unsupported
-        assert_eq!(measurements.tags.len(), 0);
+        // Tag should be added since E1 format is now supported
+        assert_eq!(measurements.tags.len(), 1);
+        assert!(measurements.tags.contains_key("E1:67:4C:F5:77:29"));
+
+        // Verify it's E1 format
+        let tag = measurements.tags.get("E1:67:4C:F5:77:29").unwrap();
+        assert!(matches!(tag.values, RuuviData::E1(_)));
     }
 
     #[test]

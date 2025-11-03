@@ -1,10 +1,27 @@
 use crate::config::MacMapping;
 use crate::measurements::Measurements;
-use crate::metrics::{labelset, metric};
-use ruuvi_sensor_protocol::{
-    Acceleration, BatteryPotential, Humidity, MeasurementSequenceNumber, MovementCounter, Pressure,
-    Temperature, TransmitterPower,
-};
+use crate::metrics::{labelset, metric, LabelSet};
+
+// Helper functions for metric collection
+fn add_metric<T: std::fmt::Display>(
+    metrics: &mut Vec<String>,
+    name: &str,
+    labels: &LabelSet,
+    value: T,
+) {
+    metrics.push(metric(name).labels(labels).value(value).to_string());
+}
+
+fn add_optional_metric<T: std::fmt::Display>(
+    metrics: &mut Vec<String>,
+    name: &str,
+    labels: &LabelSet,
+    value: Option<T>,
+) {
+    if let Some(v) = value {
+        add_metric(metrics, name, labels, v);
+    }
+}
 
 pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
     let mut metrics = Vec::new();
@@ -15,21 +32,19 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
         gw_labels = gw_labels.label("name", name);
     }
 
-    metrics.push(
-        metric("ruuvi_gateway_update_timestamp_seconds")
-            .labels(&gw_labels)
-            .value(state.last_update.to_unix_seconds())
-            .to_string(),
+    add_metric(
+        &mut metrics,
+        "ruuvi_gateway_update_timestamp_seconds",
+        &gw_labels,
+        state.last_update.to_unix_seconds(),
     );
 
-    if let Some(nonce) = state.last_nonce {
-        metrics.push(
-            metric("ruuvi_gateway_nonce")
-                .labels(&gw_labels)
-                .value(nonce)
-                .to_string(),
-        );
-    }
+    add_optional_metric(
+        &mut metrics,
+        "ruuvi_gateway_nonce",
+        &gw_labels,
+        state.last_nonce,
+    );
 
     // Tag metrics
     for (mac, tag) in &state.tags {
@@ -39,101 +54,171 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
             labels = labels.label("name", name);
         }
 
-        // Timestamps and sequence numbers
-        metrics.push(
-            metric("ruuvi_tag_last_seen_timestamp_seconds")
-                .labels(&labels)
-                .value(tag.last_seen.to_unix_seconds())
-                .to_string(),
+        // Timestamps
+        add_metric(
+            &mut metrics,
+            "ruuvi_tag_last_seen_timestamp_seconds",
+            &labels,
+            tag.last_seen.to_unix_seconds(),
         );
 
-        if let Some(sequence_number) = tag.values.measurement_sequence_number() {
-            metrics.push(
-                metric("ruuvi_tag_sequence_number")
-                    .labels(&labels)
-                    .value(sequence_number)
-                    .to_string(),
-            );
-        }
+        // Extract data based on format
+        match &tag.values {
+            ruuvi_decoders::RuuviData::V5(data) => {
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_sequence_number",
+                    &labels,
+                    data.measurement_sequence,
+                );
 
-        // Environmental measurements
-        if let Some(temp_mc) = tag.values.temperature_as_millicelsius() {
-            metrics.push(
-                metric("ruuvi_tag_temperature_celsius")
-                    .labels(&labels)
-                    .value(f64::from(temp_mc) / 1000.0)
-                    .to_string(),
-            );
-        }
+                // Environmental measurements
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_temperature_celsius",
+                    &labels,
+                    data.temperature,
+                );
 
-        if let Some(humidity_ppm) = tag.values.humidity_as_ppm() {
-            metrics.push(
-                metric("ruuvi_tag_humidity_ratio")
-                    .labels(&labels)
-                    .value(f64::from(humidity_ppm) / 1e6)
-                    .to_string(),
-            );
-        }
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_humidity_ratio",
+                    &labels,
+                    data.humidity.map(|h| h / 100.0),
+                );
 
-        if let Some(pressure) = tag.values.pressure_as_pascals() {
-            metrics.push(
-                metric("ruuvi_tag_pressure_pascals")
-                    .labels(&labels)
-                    .value(pressure)
-                    .to_string(),
-            );
-        }
-        // Movement and acceleration
-        if let Some(moves) = tag.values.movement_counter() {
-            metrics.push(
-                metric("ruuvi_tag_movement_counter")
-                    .labels(&labels)
-                    .value(moves)
-                    .to_string(),
-            );
-        }
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_pressure_pascals",
+                    &labels,
+                    data.pressure,
+                );
 
-        if let Some(acceleration) = tag.values.acceleration_vector_as_milli_g() {
-            for (axis, value) in [
-                ('x', acceleration.0),
-                ('y', acceleration.1),
-                ('z', acceleration.2),
-            ] {
-                metrics.push(
-                    metric(&format!("ruuvi_tag_acceleration_{}_g", axis))
-                        .labels(&labels)
-                        .value(f64::from(value) / 1000.0)
-                        .to_string(),
+                // Movement and acceleration
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_movement_counter",
+                    &labels,
+                    data.movement_counter,
+                );
+
+                if let (Some(x), Some(y), Some(z)) =
+                    (data.acceleration_x, data.acceleration_y, data.acceleration_z)
+                {
+                    for (axis, value) in [('x', x), ('y', y), ('z', z)] {
+                        add_metric(
+                            &mut metrics,
+                            &format!("ruuvi_tag_acceleration_{}_g", axis),
+                            &labels,
+                            f64::from(value) / 1000.0,
+                        );
+                    }
+                }
+
+                // Device status
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_battery_volts",
+                    &labels,
+                    data.battery_voltage.map(|v| f64::from(v) / 1000.0),
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_tx_power_dBm",
+                    &labels,
+                    data.tx_power,
+                );
+            }
+            ruuvi_decoders::RuuviData::V6(data) => {
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_sequence_number",
+                    &labels,
+                    data.measurement_sequence,
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_temperature_celsius",
+                    &labels,
+                    data.temperature,
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_humidity_ratio",
+                    &labels,
+                    data.humidity.map(|h| h / 100.0),
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_pressure_pascals",
+                    &labels,
+                    data.pressure,
+                );
+
+                // V6-specific metrics
+                add_optional_metric(&mut metrics, "ruuvi_tag_pm2_5_ugm3", &labels, data.pm2_5);
+                add_optional_metric(&mut metrics, "ruuvi_tag_co2_ppm", &labels, data.co2);
+                add_optional_metric(&mut metrics, "ruuvi_tag_voc_index", &labels, data.voc_index);
+                add_optional_metric(&mut metrics, "ruuvi_tag_nox_index", &labels, data.nox_index);
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_luminosity_lux",
+                    &labels,
+                    data.luminosity,
+                );
+            }
+            ruuvi_decoders::RuuviData::E1(data) => {
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_sequence_number",
+                    &labels,
+                    data.measurement_sequence,
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_temperature_celsius",
+                    &labels,
+                    data.temperature,
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_humidity_ratio",
+                    &labels,
+                    data.humidity.map(|h| h / 100.0),
+                );
+
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_pressure_pascals",
+                    &labels,
+                    data.pressure,
+                );
+
+                // E1-specific metrics
+                add_optional_metric(&mut metrics, "ruuvi_tag_pm1_0_ugm3", &labels, data.pm1_0);
+                add_optional_metric(&mut metrics, "ruuvi_tag_pm2_5_ugm3", &labels, data.pm2_5);
+                add_optional_metric(&mut metrics, "ruuvi_tag_pm4_0_ugm3", &labels, data.pm4_0);
+                add_optional_metric(&mut metrics, "ruuvi_tag_pm10_0_ugm3", &labels, data.pm10_0);
+                add_optional_metric(&mut metrics, "ruuvi_tag_co2_ppm", &labels, data.co2);
+                add_optional_metric(&mut metrics, "ruuvi_tag_voc_index", &labels, data.voc_index);
+                add_optional_metric(&mut metrics, "ruuvi_tag_nox_index", &labels, data.nox_index);
+                add_optional_metric(
+                    &mut metrics,
+                    "ruuvi_tag_luminosity_lux",
+                    &labels,
+                    data.luminosity,
                 );
             }
         }
 
-        // Device status
-        if let Some(battery_mv) = tag.values.battery_potential_as_millivolts() {
-            metrics.push(
-                metric("ruuvi_tag_battery_volts")
-                    .labels(&labels)
-                    .value(f64::from(battery_mv) / 1000.0)
-                    .to_string(),
-            );
-        }
-
-        if let Some(tx_power) = tag.values.tx_power_as_dbm() {
-            metrics.push(
-                metric("ruuvi_tag_tx_power_dBm")
-                    .labels(&labels)
-                    .value(tx_power)
-                    .to_string(),
-            );
-        }
-
         // Signal strength
-        metrics.push(
-            metric("ruuvi_tag_rssi_dBm")
-                .labels(&labels)
-                .value(tag.rssi)
-                .to_string(),
-        );
+        add_metric(&mut metrics, "ruuvi_tag_rssi_dBm", &labels, tag.rssi);
     }
 
     metrics.join("\n") + "\n"
@@ -142,7 +227,6 @@ pub fn collect_metrics(state: &Measurements, names: &MacMapping) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::measurements::Tag;
     use crate::rw_message::TagMessage;
     use hifitime::Epoch;
 

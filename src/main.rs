@@ -1,9 +1,5 @@
 use clap::Parser;
 use parking_lot::Mutex;
-use ruuvi_sensor_protocol::{
-    Acceleration, BatteryPotential, Humidity, MeasurementSequenceNumber, MovementCounter, Pressure,
-    Temperature, TransmitterPower,
-};
 use rw_message::GwMessage;
 use std::{net::IpAddr, sync::Arc};
 use warp::{reply::Reply, Filter};

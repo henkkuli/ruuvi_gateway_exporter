@@ -400,6 +400,9 @@ name = "hex"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7f24254aa9a54b5c858eaee2f5bccdb46aaf0e486a595ed5fd8f86ba55232a70"
+dependencies = [
+ "serde",
+]
 
 [[package]]
 name = "hifitime"
@@ -977,6 +980,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f7c45b9784283f1b2e7fb61b42047c2fd678ef0960d4f6f1eba131594cc369d4"
 
 [[package]]
+name = "ruuvi-decoders"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b2c35276393289d712184d254a503a85094d9fe927eb928e67d927024cd0bb59"
+dependencies = [
+ "hex",
+ "serde",
+ "thiserror 2.0.11",
+]
+
+[[package]]
 name = "ruuvi-gw-exporter"
 version = "0.1.0"
 dependencies = [
@@ -984,7 +998,7 @@ dependencies = [
  "hex",
  "hifitime",
  "parking_lot",
- "ruuvi-sensor-protocol",
+ "ruuvi-decoders",
  "serde",
  "serde_json",
  "serde_yaml",
@@ -992,15 +1006,6 @@ dependencies = [
  "thiserror 2.0.11",
  "tokio",
  "warp",
-]
-
-[[package]]
-name = "ruuvi-sensor-protocol"
-version = "0.6.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "edd5c692efdbfa1fc9802416cc6066e6b005da84e5ce5245bc23ec22b7bc0a7a"
-dependencies = [
- "serde_json",
 ]
 
 [[package]]
