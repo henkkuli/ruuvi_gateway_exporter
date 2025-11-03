@@ -16,7 +16,7 @@ pub struct Metric<'a, V> {
     value: V,
 }
 
-pub fn metric(name: &str) -> MetricBuilder {
+pub fn metric(name: &str) -> MetricBuilder<'_> {
     MetricBuilder {
         name,
         labels: Vec::new(),
@@ -40,6 +40,7 @@ impl<'a> MetricBuilder<'a> {
         self
     }
 
+    #[allow(dead_code)]
     pub fn label(mut self, key: &'a str, value: &'a str) -> Self {
         self.labels.push((key, value));
         self
