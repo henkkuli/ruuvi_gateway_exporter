@@ -101,13 +101,8 @@ mod tests {
     #[test]
     fn test_update_tag_with_e1_format() {
         // E1 format is now supported by ruuvi-decoders
-        let payload = vec![
-            153, 4, 225, 16, 254, 64, 140, 197, 61, 0, 3, 0, 6, 0, 9, 0, 11, 2, 86, 13, 0, 255,
-            255, 255, 255, 255, 255, 0, 30, 190, 184, 255, 255, 255, 255, 255, 246, 191, 178, 238,
-            209, 86,
-        ];
-        let mut data = vec![1 + payload.len() as u8, 0xff];
-        data.extend_from_slice(&payload);
+        let data =
+            hex::decode("2BFF9904E110FE408CC53D000300060009000B02560D00FFFFFFFFFFFF001EBEB8FFFFFFFFFFF6BFB2EED156").unwrap();
 
         let tag = TagMessage {
             name: "E1:67:4C:F5:77:29".to_string(),
